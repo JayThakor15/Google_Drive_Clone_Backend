@@ -1,4 +1,5 @@
 import supabase from '../db/index.js';
+import { v4 as uuidv4 } from 'uuid';
 
 export async function uploadFile(req, res) {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -140,4 +141,56 @@ export async function getTrashedFolders(req, res) {
 
   if (error) return res.status(500).json({ error: error.message });
   res.json({ folders: data });
+}
+
+// Share file: generate unique token and save
+export async function shareFile(req, res) {
+  const { id } = req.params;
+  const shareToken = uuidv4();
+
+  const { data, error } = await supabase
+    .from('files')
+    .update({ share_token: shareToken })
+    .eq('id', id)
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  res.json({ shareableLink: `/files/share/${shareToken}` });
+}
+
+// Access shared file via token and generate signed URL
+export async function accessSharedFile(req, res) {
+  const { token } = req.params;
+  const { data, error } = await supabase
+    .from('files')
+    .select('*')
+    .eq('share_token', token)
+    .single();
+
+  if (error || !data) return res.status(404).json({ error: 'File not found' });
+
+  // Generate signed URL for secure access
+  const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+    .from('files')
+    .createSignedUrl(data.url.replace(/^.*\/files\//, ''), 60);
+
+  if (signedUrlError) return res.status(500).json({ error: signedUrlError.message });
+
+  res.json({ signedUrl: signedUrlData.signedUrl });
+}
+
+// Set file permission for a user
+export async function setFilePermission(req, res) {
+  const { id } = req.params;
+  const { user_id, role } = req.body; // role: 'owner', 'view', 'edit'
+
+  const { data, error } = await supabase
+    .from('permissions')
+    .insert([{ user_id, file_id: id, role }])
+    .select();
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  res.json({ message: 'Permission set', permission: data[0] });
 }
